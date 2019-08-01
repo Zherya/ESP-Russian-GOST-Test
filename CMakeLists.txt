@@ -6,7 +6,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -DLIBAKRYPT_HAVE_SYSTYPES_H -pedantic-
 message("Compiler options are ${CMAKE_C_FLAGS}")
 
 include_directories(/usr/local/include /usr/local/lib)
-find_library(LIBAKRYPT akrypt REQUIRED)
+find_library(LIBAKRYPT akrypt-static REQUIRED)
 find_library(PCAP pcap REQUIRED)
 message("Included libraries are ${LIBAKRYPT} and ${PCAP}")
 

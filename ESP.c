@@ -276,8 +276,17 @@ unsigned char* ESP_getPacket(const unsigned char *payload, const size_t payloadL
 
     // ESP Header:
     struct ESPHeader ESPHead;
-    ESPHead.SPI = htonl(14000); // Значения 0-255 не используются
-    ESPHead.SeqNum = htonl(1);
+    if (algorithm == KUZNYECHIK_ENCR || algorithm == KUZNYECHIK_MAC) {
+        // SPI = 0xa900ab4d в сетевом порядке байт (флаг ak_false):
+        ak_hexstr_to_ptr("a900ab4d", &(ESPHead.SPI), 4, ak_false);
+        // Sequence Number = 10 в сетевом порядке байт (флаг ak_false):
+        ak_hexstr_to_ptr("00000010", &(ESPHead.SeqNum), 4, ak_false);
+    } else {
+        // SPI = 0x8048d05d в сетевом порядке байт (флаг ak_false):
+        ak_hexstr_to_ptr("8048d05d", &(ESPHead.SPI), 4, ak_false);
+        // Sequence Number = 10 в сетевом порядке байт (флаг ak_false):
+        ak_hexstr_to_ptr("00000010", &(ESPHead.SeqNum), 4, ak_false);
+    }
 
     // IV:
     unsigned char *IV = ESP_getIV();
@@ -353,8 +362,30 @@ unsigned char* ESP_getRootKeyAndSalt(size_t *keySize, size_t *saltSize, AEAD_Alg
     if (keyAndSalt == NULL)
         return NULL;
     // Заполним значения ключа и соли:
-    for (size_t i = 0, size = *keySize + *saltSize; i < size; ++i)
-        keyAndSalt[i] = i;
+    if (algorithm == KUZNYECHIK_ENCR || algorithm == KUZNYECHIK_MAC) {
+        // Ключ:
+        if (ak_hexstr_to_ptr("b91d0afc12657232cf90ae6cbee8c10e8bfdf9c3831871d743a41c6248c2dea0", keyAndSalt, *keySize, ak_false) != ak_error_ok) {
+            printf("Ошибка получения корневого ключа для \"Кузнечика\"\n");
+            return NULL;
+        };
+        // Соль:
+        if (ak_hexstr_to_ptr("b9c546bfb2dc5694e6d6543a", keyAndSalt + *keySize, *saltSize, ak_false) != ak_error_ok) {
+            printf("Ошибка получения соли для \"Кузнечика\"\n");
+            return NULL;
+        };
+    } else {
+        // Ключ:
+        if (ak_hexstr_to_ptr("0c0aaa541c395636a1866f6b2161e719f7ee53ef7245c19bc6875c453b39cc03", keyAndSalt, *keySize, ak_false) != ak_error_ok) {
+            printf("Ошибка получения корневого ключа для \"Магмы\"\n");
+            return NULL;
+        }
+        // Соль:
+        if (ak_hexstr_to_ptr("d6fdc007", keyAndSalt + *keySize, *saltSize, ak_false) != ak_error_ok) {
+            printf("Ошибка получения соли для \"Магмы\"\n");
+            return NULL;
+        }
+    }
+
     // Выведем результаты на экран:
     char *keyStr = ak_ptr_to_hexstr(keyAndSalt, *keySize, ak_false);
     char *saltStr = ak_ptr_to_hexstr(keyAndSalt + *keySize, *saltSize, ak_false);
@@ -409,7 +440,7 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
         // Для Магмы - 64 бита (8 байт):
         ICVLen = 8;
 
-    // Вычислим длину данных для шифрования и выделим соответствующию память:
+    // Вычислим длину данных для шифрования и выделим соответствующую память:
     size_t plainDataLen;
     unsigned char *plainData;
     if (algorithm == KUZNYECHIK_ENCR || algorithm == MAGMA_ENCR) {
@@ -423,6 +454,26 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
             return ak_false;
         }
         memcpy(plainData, packet + 16, plainDataLen);
+        char *plainDataStr = NULL;
+        // В силу особенностей реализации,
+        // развернем каждый 16-байтный блок открытого текста:
+        printf("РАЗВОРОТ ОТКРЫТОГО ТЕКСТА ПО БЛОКАМ\n");
+        printf("Открытый текст (в виде, подаваемом на шифрование) = 0x\n");
+        for (size_t i = 0, end = plainDataLen % 16 == 0 ? (plainDataLen / 16) : (plainDataLen / 16 + 1); i < end; ++i) {
+            // В случае последней итерации длина оставшегося открытого текста может быть
+            // не равна 16, поэтому выделим её:
+            if (i == end - 1 && plainDataLen % 16 != 0) {
+                // Длина последнего блока - это разность длины открытого текста
+                // и суммарной длины всех 16-байтных блоков:
+                plainDataStr = ak_ptr_to_hexstr(plainData + 16 * i, plainDataLen - (plainDataLen / 16) * 16, ak_true);
+                ak_hexstr_to_ptr(plainDataStr, plainData + 16 * i, plainDataLen - (plainDataLen / 16) * 16, ak_false);
+            } else {
+                plainDataStr = ak_ptr_to_hexstr(plainData + 16 * i, 16, ak_true);
+                ak_hexstr_to_ptr(plainDataStr, plainData + 16 * i, 16, ak_false);
+            }
+            printf("%s\n", plainDataStr);
+            free(plainDataStr);
+        }
     }
     else {
         // В случае режимов без шифрования обнуляем соответствующие значения:
@@ -449,10 +500,26 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
         free(rootKey);
         return ak_false;
     }
+    char *nonceStr = NULL;
+    // Развернем nonce (опять же, в силу особенностей реализации):
+    printf("РАЗВОРОТ NONCE\n");
+    nonceStr = ak_ptr_to_hexstr(nonce, nonceSize, ak_true);
+    ak_hexstr_to_ptr(nonceStr, nonce, nonceSize, ak_false);
+    free(nonceStr);
+    // Для проверки получим строку из готового nonce
+    nonceStr = ak_ptr_to_hexstr(nonce, nonceSize, ak_false);
+    printf("Nonce (в виде, подаваемом на шифрование) = 0x%s\n", nonceStr);
+    free(nonceStr);
 
     // Получим ключ шифрования сообщения:
     // Параметры диверсификации берутся из ESP IV:
-    unsigned short i1 = packet[8], i2 = *((unsigned short *)(packet + 9)), i3 = *((unsigned short *)(packet + 11));
+    unsigned short i1 = packet[8];
+    // Так как 1 байт i1 из IV записался в двубайтный i1 для ESP_TREE в принятом
+    // на хосте формате little-endian (то есть этот байт записался в левый разряд,
+    // что увеличивает значение, которое выходит за диапазон 255), поэтому развернем полученный
+    // двубайтный i1 в сетевой формат:
+    i1 = htons(i1);
+    unsigned short i2 = *((unsigned short *)(packet + 9)), i3 = *((unsigned short *)(packet + 11));
     // Параметры i2, i3 помещаются в ESPTREE как были в IV, то есть в сетевом порядке байт:
     ak_buffer msgKey = ESP_TREE(rootKey, rootKeySize, i1, i2, i3);
     if (msgKey == NULL) {
@@ -463,6 +530,16 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
         return ak_false;
     }
     free(rootKey);
+    char *msgKeyStr = NULL;
+    // Выведем на экран ключ шифрования и развернем его:
+    printf("РАЗВОРОТ КЛЮЧА ШИФРОВАНИЯ\n");
+    msgKeyStr = ak_ptr_to_hexstr(ak_buffer_get_ptr(msgKey), ak_buffer_get_size(msgKey), ak_true);
+    ak_hexstr_to_ptr(msgKeyStr, ak_buffer_get_ptr(msgKey), ak_buffer_get_size(msgKey), ak_false);
+    free(msgKeyStr);
+    // Для проверки получим строку из готового msgKey:
+    msgKeyStr = ak_ptr_to_hexstr(ak_buffer_get_ptr(msgKey), ak_buffer_get_size(msgKey), ak_false);
+    printf("Ключ шифрования (в виде, подаваемом на шифрование) = 0x%s\n", msgKeyStr);
+    free(msgKeyStr);
 
     // Определим размер дополнительных аутентифицируемых данных (AAD):
     size_t AADSize;
@@ -472,6 +549,21 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
     else
         // Иначе AAD = весь пакет (без ICV, очевидно):
         AADSize = packetLen - ICVLen;
+    // Выделим под AAD отдельную память, чтобы можно было развернуть AAD
+    // (в силу особенностей реализации алгоритма шифрования), оставив исходные данные
+    // в пакете без изменений:
+    unsigned char *AAD = malloc(AADSize);
+    memcpy(AAD, packet, AADSize);
+    char *AADStr = NULL;
+    // Выведем AAD на экран и развернем его:
+    printf("РАЗВОРОТ AAD\n");
+    AADStr = ak_ptr_to_hexstr(AAD, AADSize, ak_true);
+    ak_hexstr_to_ptr(AADStr, AAD, AADSize, ak_false);
+    free(AADStr);
+    // Для проверки получим строку из готового AAD
+    AADStr = ak_ptr_to_hexstr(AAD, AADSize, ak_false);
+    printf("AAD (в виде, подаваемом на шифрование) = 0x%s\n", AADStr);
+    free(AADStr);
 
     // Установим ключ шифрования сообщения:
     struct bckey keyContext;
@@ -510,7 +602,7 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
         ak_bckey_context_encrypt_mgm(&keyContext,     // Ключ для шифрования
                                                       // (для режимов без шифрования - NULL)
                                      &keyContext,     // Ключ для вычисления имитовставки
-                                     packet,          // Указатель на начало AAD
+                                     AAD,             // Указатель на начало AAD
                                      AADSize,         // Размер AAD
                                      plainData,       // Указатель на начало открытого текста
                                                       // (для режимов без шифрования - NULL)
@@ -528,7 +620,7 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
         ak_bckey_context_encrypt_mgm(NULL,            // Ключ для шифрования
                                                       // (для режимов без шифрования - NULL)
                                      &keyContext,     // Ключ для вычисления имитовставки
-                                     packet,          // Указатель на начало AAD
+                                     AAD,             // Указатель на начало AAD
                                      AADSize,         // Размер AAD
                                      NULL,            // Указатель на начало открытого текста
                                                       // (для режимов без шифрования - NULL)
@@ -553,6 +645,9 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
         return ak_false;
     }
 
+    free(plainData);
+    free(nonce);
+    ak_bckey_context_destroy(&keyContext);
     return ak_true;
 }
 
@@ -607,26 +702,28 @@ void ESP_printPacket(const unsigned char *packet, const size_t packetLen, AEAD_A
         //.2 в строке формата задает точность вывода
         // (минимальное число цифр, в данном случае старший
         // разряд байта по необходимости дополняется нулем):
-        printf("%.2hhX", packet[i]);
+        printf("%.2hhX ", packet[i]);
     // Разбор ESP Header по полям:
     struct ESPHeader *ESPHead = (struct ESPHeader *)packet;
-    printf(":  SPI = 0x%.2X; ", ntohl(ESPHead->SPI));
-    printf("SN = 0x%.2X\n", ntohl(ESPHead->SeqNum));
+    // Для 4-байтного числа имеет место 8-емь 16-ричных цифр:
+    printf(":  SPI = 0x%.8X; ", ntohl(ESPHead->SPI));
+    printf("SN = 0x%.8X\n", ntohl(ESPHead->SeqNum));
     printf("-------------------------------------\n");
 
     // Шестнадцатеричное представление IV (с 8 по 15 байт):
     printf("IV = 0x");
     for (int i = 8; i < 16; ++i)
-        printf("%.2hhX", packet[i]);
+        printf("%.2hhX ", packet[i]);
     // Разбор IV по полям:
     // Первый байт IV (8-ой от начала пакета) - это параметр i1:
     printf(":  i1 = 0x%.2hhX; ", packet[8]);
     // Второй и третий - i2:
     unsigned short *i1and2 = (unsigned short *)(packet + 9);
-    printf("i2 = 0x%.2hX; ", ntohs(*i1and2));
+    // Для 2-байтного числа имеет место 4-ре 16-ричных цифр:
+    printf("i2 = 0x%.4hX; ", ntohs(*i1and2));
     // Четвертый и пятый - i3:
     i1and2 = (unsigned short *)(packet + 11);
-    printf("i3 = 0x%.2hX; ", ntohs(*i1and2));
+    printf("i3 = 0x%.4hX; ", ntohs(*i1and2));
     // Последние три байта - это порядковый номер сообщения C:
     printf("С = 0x");
     for (int i = 13; i < 16; ++i)
@@ -637,9 +734,14 @@ void ESP_printPacket(const unsigned char *packet, const size_t packetLen, AEAD_A
         // Полезные данные пакета располагаются со смещения 16:
         if (encrypted)
             printf("Encrypted ");
-        printf("Payload = 0x");
-        for (int i = 16, end = i + payloadLen; i < end; ++i)
-            printf("%.2hhX", packet[i]);
+        printf("Payload = 0x\n");
+        for (int i = 16, end = i + payloadLen; i < end; ++i) {
+            printf("%.2hhX ", packet[i]);
+            // Для удобства чтения в каждой строке будем печатать
+            // только 16 байт:
+            if ((i + 1) % 16 == 0)
+                printf("\n");
+        }
         printf("\n");
     }
     printf("Длина полезных данных - %lu байт(а)\n", payloadLen);
@@ -650,7 +752,7 @@ void ESP_printPacket(const unsigned char *packet, const size_t packetLen, AEAD_A
         // Шестнадцатеричное представление ESP Trailer:
         printf("ESP Trailer = 0x");
         for (int i = 16 + payloadLen, end = i + trailerLen; i < end; ++i)
-            printf("%.2hhX", packet[i]);
+            printf("%.2hhX ", packet[i]);
         printf(":  ");
         // Разбор ESP Trailer по полям:
         // В начале располагается Padding:
@@ -669,7 +771,7 @@ void ESP_printPacket(const unsigned char *packet, const size_t packetLen, AEAD_A
     // Шестнадцатеричное представление ICV:
     printf("ICV = 0x");
     for (int i = 16 + payloadLen + trailerLen; i < packetLen; ++i)
-        printf("%.2hhX", packet[i]);
+        printf("%.2hhX ", packet[i]);
     printf(":\nДлина ICV - %hhu байт(а)\n", ICVLen);
     printf("-------------------------------------------------------------------------------\n");
 }

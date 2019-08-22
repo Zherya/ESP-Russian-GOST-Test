@@ -5,8 +5,8 @@
  *    и разбора основных полей заголовков протоколов IP и TCP
  *
  * ----------------------------------------------------------------------------------------------- */
-#ifndef ESP_SKELETON_SNIFFER_H
-#define ESP_SKELETON_SNIFFER_H
+#ifndef ESP_RUSSIAN_GOST_TEST_SNIFFER_H
+#define ESP_RUSSIAN_GOST_TEST_SNIFFER_H
 
 /* ----------------------------------------------------------------------------------------------- */
 #include <pcap/pcap.h>
@@ -32,4 +32,4 @@ void printIPHeader(const struct ip *header);
 void printTCPHeader(const struct tcphdr *header);
 
 /* ----------------------------------------------------------------------------------------------- */
-#endif //ESP_SKELETON_SNIFFER_H
+#endif //ESP_RUSSIAN_GOST_TEST_SNIFFER_H

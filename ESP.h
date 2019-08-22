@@ -5,8 +5,8 @@
  *    алгоритмов с помощью библиотеки akrypt.
  *
  * ----------------------------------------------------------------------------------------------- */
-#ifndef ESP_SKELETON_ESP_H
-#define ESP_SKELETON_ESP_H
+#ifndef ESP_RUSSIAN_GOST_TEST_ESP_H
+#define ESP_RUSSIAN_GOST_TEST_ESP_H
 
 /* ----------------------------------------------------------------------------------------------- */
 #include <stdio.h>
@@ -131,4 +131,4 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
 void ESP_printPacket(const unsigned char *packet, const size_t packetLen, AEAD_Algorithm algorithm, bool_t encrypted);
 
 /* ----------------------------------------------------------------------------------------------- */
-#endif //ESP_SKELETON_ESP_H
+#endif //ESP_RUSSIAN_GOST_TEST_ESP_H

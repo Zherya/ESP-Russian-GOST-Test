@@ -189,9 +189,9 @@ ak_buffer ESP_TREE(ak_uint8 *key, const size_t keySize, unsigned short i1,
 // Полученный указатель в дальнейшем должен быть передан функции free()
 // для освобождения выделенных ресурсов. В случае неудачи возвращается NULL.
 unsigned char* ESP_getIV() {
-    // Initialization Vector (IV), 8 байт: i1 | i2 | i3 | C,
+    // Initialization Vector (IV), 8 байт: i1 | i2 | i3 | pnum,
     // где i1 - 1 байт; i2, i3 - 2 байта; i1, i2, i3 - параметры диверсификации;
-    // С - 3 байта - порядковый номер сообщения.
+    // pnum - 3 байта - порядковый номер сообщения.
     unsigned char *IV = malloc(8);
     if (IV == NULL)
         return NULL;
@@ -257,7 +257,7 @@ unsigned char* ESP_getPacket(const unsigned char *payload, const size_t payloadL
  *
  *  - ESP-payload:
  *      - Initialization Vector (IV), 8 байт: i1 | i2 | i3 | C, где i1 - 1 байт; i2, i3 - 2 байта
- *                     С - 3 байта - порядковый номер сообщения; i1, i2, i3 - параметры диверсификации
+ *                     pnum - 3 байта - порядковый номер сообщения; i1, i2, i3 - параметры диверсификации
  *      - Передаваемые данные + опциональное заполнение для сокрытия длины
  *
  *  - ESP-Trailer:
@@ -276,16 +276,56 @@ unsigned char* ESP_getPacket(const unsigned char *payload, const size_t payloadL
 
     // ESP Header:
     struct ESPHeader ESPHead;
-    if (algorithm == KUZNYECHIK_ENCR || algorithm == KUZNYECHIK_MAC) {
-        // SPI = 0xa900ab4d в сетевом порядке байт (флаг ak_false):
-        ak_hexstr_to_ptr("a900ab4d", &(ESPHead.SPI), 4, ak_false);
-        // Sequence Number = 10 в сетевом порядке байт (флаг ak_false):
-        ak_hexstr_to_ptr("00000010", &(ESPHead.SeqNum), 4, ak_false);
-    } else {
-        // SPI = 0x8048d05d в сетевом порядке байт (флаг ak_false):
-        ak_hexstr_to_ptr("8048d05d", &(ESPHead.SPI), 4, ak_false);
-        // Sequence Number = 10 в сетевом порядке байт (флаг ak_false):
-        ak_hexstr_to_ptr("00000010", &(ESPHead.SeqNum), 4, ak_false);
+    // Заполним SPI и SN:
+    switch (algorithm) {
+        case KUZNYECHIK_ENCR:
+            // SPI = 0x5146536b в сетевом порядке байт (флаг ak_false):
+            if (ak_hexstr_to_ptr("5146536b", &(ESPHead.SPI), 4, ak_false) != ak_error_ok) {
+                printf("Ошибка получения SPI для \"Кузнечика\" с шифрованием\n");
+                return NULL;
+            }
+            // Sequence Number = 1 в сетевом порядке байт (флаг ak_false):
+            if (ak_hexstr_to_ptr("00000001", &(ESPHead.SeqNum), 4, ak_false) != ak_error_ok) {
+                printf("Ошибка получения SN для \"Кузнечика\" с шифрованием\n");
+                return NULL;
+            }
+            break;
+        case KUZNYECHIK_MAC:
+            // SPI = 0x3dac926a в сетевом порядке байт (флаг ak_false):
+            if (ak_hexstr_to_ptr("3dac926a", &(ESPHead.SPI), 4, ak_false) != ak_error_ok) {
+                printf("Ошибка получения SPI для \"Кузнечика\" без шифрования\n");
+                return NULL;
+            }
+            // Sequence Number = 1 в сетевом порядке байт (флаг ak_false):
+            if (ak_hexstr_to_ptr("00000001", &(ESPHead.SeqNum), 4, ak_false) != ak_error_ok) {
+                printf("Ошибка получения SN для \"Кузнечика\" без шифрования\n");
+                return NULL;
+            }
+            break;
+        case MAGMA_ENCR:
+            // SPI = c8c2b28d в сетевом порядке байт (флаг ak_false):
+            if (ak_hexstr_to_ptr("c8c2b28d", &(ESPHead.SPI), 4, ak_false) != ak_error_ok) {
+                printf("Ошибка получения SPI для \"Магмы\" с шифрованием\n");
+                return NULL;
+            }
+            // Sequence Number = 1 в сетевом порядке байт (флаг ak_false):
+            if (ak_hexstr_to_ptr("00000001", &(ESPHead.SeqNum), 4, ak_false) != ak_error_ok) {
+                printf("Ошибка получения SN для \"Магмы\" с шифрованием\n");
+                return NULL;
+            }
+            break;
+        case MAGMA_MAC:
+            // SPI = 3e40699c в сетевом порядке байт (флаг ak_false):
+            if (ak_hexstr_to_ptr("3e40699c", &(ESPHead.SPI), 4, ak_false) != ak_error_ok) {
+                printf("Ошибка получения SPI для \"Магмы\" без шифрования\n");
+                return NULL;
+            }
+            // Sequence Number = 1 в сетевом порядке байт (флаг ak_false):
+            if (ak_hexstr_to_ptr("00000001", &(ESPHead.SeqNum), 4, ak_false) != ak_error_ok) {
+                printf("Ошибка получения SN для \"Магмы\" без шифрования\n");
+                return NULL;
+            }
+            break;
     }
 
     // IV:
@@ -362,28 +402,55 @@ unsigned char* ESP_getRootKeyAndSalt(size_t *keySize, size_t *saltSize, AEAD_Alg
     if (keyAndSalt == NULL)
         return NULL;
     // Заполним значения ключа и соли:
-    if (algorithm == KUZNYECHIK_ENCR || algorithm == KUZNYECHIK_MAC) {
-        // Ключ:
-        if (ak_hexstr_to_ptr("b91d0afc12657232cf90ae6cbee8c10e8bfdf9c3831871d743a41c6248c2dea0", keyAndSalt, *keySize, ak_false) != ak_error_ok) {
-            printf("Ошибка получения корневого ключа для \"Кузнечика\"\n");
-            return NULL;
-        };
-        // Соль:
-        if (ak_hexstr_to_ptr("b9c546bfb2dc5694e6d6543a", keyAndSalt + *keySize, *saltSize, ak_false) != ak_error_ok) {
-            printf("Ошибка получения соли для \"Кузнечика\"\n");
-            return NULL;
-        };
-    } else {
-        // Ключ:
-        if (ak_hexstr_to_ptr("0c0aaa541c395636a1866f6b2161e719f7ee53ef7245c19bc6875c453b39cc03", keyAndSalt, *keySize, ak_false) != ak_error_ok) {
-            printf("Ошибка получения корневого ключа для \"Магмы\"\n");
-            return NULL;
-        }
-        // Соль:
-        if (ak_hexstr_to_ptr("d6fdc007", keyAndSalt + *keySize, *saltSize, ak_false) != ak_error_ok) {
-            printf("Ошибка получения соли для \"Магмы\"\n");
-            return NULL;
-        }
+    switch (algorithm) {
+        case KUZNYECHIK_ENCR:
+            // Ключ:
+            if (ak_hexstr_to_ptr("b6180c145c512dbd69d9cea92cac1b5ce1bcfa73792d61af0b440d84b522cc38", keyAndSalt, *keySize, ak_false) != ak_error_ok) {
+                printf("Ошибка получения корневого ключа для \"Кузнечика\" с шифрованием\n");
+                return NULL;
+            }
+            // Соль:
+            if (ak_hexstr_to_ptr("7b67e6f244f97f0678952e45", keyAndSalt + *keySize, *saltSize, ak_false) != ak_error_ok) {
+                printf("Ошибка получения соли для \"Кузнечика\" с шифрованием\n");
+                return NULL;
+            }
+            break;
+        case KUZNYECHIK_MAC:
+            // Ключ:
+            if (ak_hexstr_to_ptr("98bd34ce3be19a3465e487c0064883f488cc239263dc3204919b643fe757b2be", keyAndSalt, *keySize, ak_false) != ak_error_ok) {
+                printf("Ошибка получения корневого ключа для \"Кузнечика\" без шифрования\n");
+                return NULL;
+            }
+            // Соль:
+            if (ak_hexstr_to_ptr("6c51cbac93c45bea9962791d", keyAndSalt + *keySize, *saltSize, ak_false) != ak_error_ok) {
+                printf("Ошибка получения соли для \"Кузнечика\" без шифрования\n");
+                return NULL;
+            }
+            break;
+        case MAGMA_ENCR:
+            // Ключ:
+            if (ak_hexstr_to_ptr("5b50bf3378870238f3ca740fd124ba6c2283ef589be6f46a894aa35d5f06b203", keyAndSalt, *keySize, ak_false) != ak_error_ok) {
+                printf("Ошибка получения корневого ключа для \"Магмы\" с шифрованием\n");
+                return NULL;
+            }
+            // Соль:
+            if (ak_hexstr_to_ptr("cf366312", keyAndSalt + *keySize, *saltSize, ak_false) != ak_error_ok) {
+                printf("Ошибка получения соли для \"Магмы\" с шифрованием\n");
+                return NULL;
+            }
+            break;
+        case MAGMA_MAC:
+            // Ключ:
+            if (ak_hexstr_to_ptr("d065b530fa20b824c7570c1d862ae3392c1c076dfada6975744a07a8857dbd30", keyAndSalt, *keySize, ak_false) != ak_error_ok) {
+                printf("Ошибка получения корневого ключа для \"Магмы\" без шифрования\n");
+                return NULL;
+            }
+            // Соль:
+            if (ak_hexstr_to_ptr("88798f29", keyAndSalt + *keySize, *saltSize, ak_false) != ak_error_ok) {
+                printf("Ошибка получения соли для \"Магмы\" без шифрования\n");
+                return NULL;
+            }
+            break;
     }
 
     // Выведем результаты на экран:
@@ -402,15 +469,15 @@ unsigned char* ESP_getRootKeyAndSalt(size_t *keySize, size_t *saltSize, AEAD_Alg
 // Полученный указатель в дальнейшем должен быть передан функции free() для освобождения
 // выделенных ресурсов. Функция также выводит на экран значение nonce.
 // В случае неудачи возвращается NULL.
-unsigned char* ESP_getNonce(const unsigned char *C, const unsigned char *salt, size_t saltSize, size_t *nonceSize) {
-    // Формат nonce: zero | C | salt, где zero - 1 нулевой байт, С - порядковый номер из IV, 3 байта
-    //                                    salt - секретная соль
+unsigned char* ESP_getNonce(const unsigned char *pnum, const unsigned char *salt, size_t saltSize, size_t *nonceSize) {
+    // Формат nonce: zero | pnum | salt, где zero - 1 нулевой байт, pnum - порядковый номер из IV, 3 байта
+    //                                   salt - секретная соль
     *nonceSize = 1 + 3 + saltSize;
     unsigned char *nonce = malloc(*nonceSize);
     if (nonce == NULL)
         return NULL;
     nonce[0] = 0;
-    memcpy(nonce + 1, C, 3);
+    memcpy(nonce + 1, pnum, 3);
     memcpy(nonce + 4, salt, saltSize);
     // Выведем результат на экран:
     char *nonceStr = ak_ptr_to_hexstr(nonce, *nonceSize, ak_false);
@@ -474,8 +541,7 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
             printf("%s\n", plainDataStr);
             free(plainDataStr);
         }
-    }
-    else {
+    } else {
         // В случае режимов без шифрования обнуляем соответствующие значения:
         plainDataLen = 0;
         plainData = NULL;
@@ -493,7 +559,7 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
 
     // Получим значение одноразового (инициализирующего) вектора nonce:
     size_t nonceSize;
-    unsigned char *nonce = ESP_getNonce(packet + 13 /*C*/, salt, saltSize, &nonceSize);
+    unsigned char *nonce = ESP_getNonce(packet + 13 /*pnum*/, salt, saltSize, &nonceSize);
     if (nonce == NULL) {
         printf("Ошибка получения вектора nonce\n");
         free(plainData);
@@ -554,15 +620,36 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
     // в пакете без изменений:
     unsigned char *AAD = malloc(AADSize);
     memcpy(AAD, packet, AADSize);
+    if (AAD == NULL) {
+        printf("Ошибка выделения памяти под AAD\n");
+        free(plainData);
+        free(nonce);
+        ak_buffer_delete(msgKey);
+        return ak_false;
+    }
     char *AADStr = NULL;
     // Выведем AAD на экран и развернем его:
-    printf("РАЗВОРОТ AAD\n");
-    AADStr = ak_ptr_to_hexstr(AAD, AADSize, ak_true);
-    ak_hexstr_to_ptr(AADStr, AAD, AADSize, ak_false);
-    free(AADStr);
+    printf("РАЗВОРОТ AAD ПО БЛОКАМ\n");
+    printf("AAD (в виде, подаваемом на шифрование) = 0x\n");
+    for (size_t i = 0, end = AADSize % 16 == 0 ? (AADSize / 16) : (AADSize / 16 + 1); i < end; ++i) {
+        // В случае последней итерации длина оставшегося AAD может быть
+        // не равна 16, поэтому выделим её:
+        if (i == end - 1 && AADSize % 16 != 0) {
+            // Длина последнего блока - это разность длины открытого текста
+            // и суммарной длины всех 16-байтных блоков:
+            AADStr = ak_ptr_to_hexstr(AAD + 16 * i, AADSize - (AADSize / 16) * 16, ak_true);
+            ak_hexstr_to_ptr(AADStr, AAD + 16 * i, AADSize - (AADSize / 16) * 16, ak_false);
+        } else {
+            AADStr = ak_ptr_to_hexstr(AAD + 16 * i, 16, ak_true);
+            ak_hexstr_to_ptr(AADStr, AAD + 16 * i, 16, ak_false);
+        }
+        printf("%s\n", AADStr);
+        free(AADStr);
+    }
     // Для проверки получим строку из готового AAD
     AADStr = ak_ptr_to_hexstr(AAD, AADSize, ak_false);
     printf("AAD (в виде, подаваемом на шифрование) = 0x%s\n", AADStr);
+    printf("Длина AAD - %lu байт(а)\n", AADSize);
     free(AADStr);
 
     // Установим ключ шифрования сообщения:
@@ -571,6 +658,7 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
         if (ak_bckey_context_create_kuznechik(&keyContext) != ak_error_ok) {
             ak_error_message(ak_error_get_value(), "ak_bckey_context_create_kuznechik",
                              "Ошибка установления контекста \"Кузнечика\"");
+            free(AAD);
             free(plainData);
             free(nonce);
             ak_buffer_delete(msgKey);
@@ -580,6 +668,7 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
         if (ak_bckey_context_create_magma(&keyContext) != ak_error_ok) {
             ak_error_message(ak_error_get_value(), "ak_bckey_context_create_magma",
                              "Ошибка установления контекста \"Магмы\"");
+            free(AAD);
             free(plainData);
             free(nonce);
             ak_buffer_delete(msgKey);
@@ -589,6 +678,7 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
     if (ak_bckey_context_set_key(&keyContext, ak_buffer_get_ptr(msgKey), ak_buffer_get_size(msgKey), ak_true) != ak_error_ok) {
         ak_error_message(ak_error_get_value(), "ak_bckey_context_set_key",
                          "Ошибка установления ключа шифрования");
+        free(AAD);
         free(plainData);
         free(nonce);
         ak_buffer_delete(msgKey);
@@ -639,12 +729,14 @@ int ESP_encryptPacket(unsigned char *packet, const size_t packetLen, AEAD_Algori
     // всегда возвращается NULL, поэтому проверим наличие ошибок с помощью соотв. функции:
     if (ak_error_get_value() != ak_error_ok) {
         ak_error_message(ak_error_get_value(), "ak_bckey_context_encrypt_mgm", "Ошибка шифрования");
+        free(AAD);
         free(plainData);
         free(nonce);
         ak_bckey_context_destroy(&keyContext);
         return ak_false;
     }
 
+    free(AAD);
     free(plainData);
     free(nonce);
     ak_bckey_context_destroy(&keyContext);
@@ -724,8 +816,8 @@ void ESP_printPacket(const unsigned char *packet, const size_t packetLen, AEAD_A
     // Четвертый и пятый - i3:
     i1and2 = (unsigned short *)(packet + 11);
     printf("i3 = 0x%.4hX; ", ntohs(*i1and2));
-    // Последние три байта - это порядковый номер сообщения C:
-    printf("С = 0x");
+    // Последние три байта - это порядковый номер сообщения pnum:
+    printf("pnum = 0x");
     for (int i = 13; i < 16; ++i)
         printf("%.2hhX", packet[i]);
     printf("\n-------------------------------------\n");

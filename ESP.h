@@ -107,13 +107,13 @@ unsigned char* ESP_getPacket(const unsigned char *payload, const size_t payloadL
 unsigned char* ESP_getRootKeyAndSalt(size_t *keySize, size_t *saltSize, AEAD_Algorithm algorithm);
 
 // Получение указателя на одноразовый вектор (nonce) для AEAD-режима шифрования.
-// В качестве аргументов выступают указатель на C из ESP IV;
+// В качестве аргументов выступают указатель на pnum из ESP IV;
 // указатель на salt, а также размер salt в байтах и указатель на размер nonce, куда записывается
 // размер возвращаемых данных. Функция возвращает в случае успеха указатель на nonce.
 // Полученный указатель в дальнейшем должен быть передан функции free() для освобождения
 // выделенных ресурсов. Функция также выводит на экран значение nonce.
 // В случае неудачи возвращается NULL.
-unsigned char* ESP_getNonce(const unsigned char *C, const unsigned char *salt, size_t saltSize, size_t *nonceSize);
+unsigned char* ESP_getNonce(const unsigned char *pnum, const unsigned char *salt, size_t saltSize, size_t *nonceSize);
 
 // Шифрование и/или вычисление имитовставки заданного ESP-пакета с помощью AEAD-алгоритма
 // algorithm. В случае шифрования и вычисления имитовставки на место полезных данных и
